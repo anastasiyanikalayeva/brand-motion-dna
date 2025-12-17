@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Brand Motion DNA // DevTool</title>
+    
+    <!-- Google Font: JetBrains Mono -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;700&display=swap" rel="stylesheet">
+    
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <main class="terminal-window">
+        <header>
+            <div class="status-dot"></div>
+            <h1>BRAND_MOTION_DNA v1.0</h1>
+        </header>
+
+        <section class="input-section">
+            <label for="clientInput">> ENTER TARGET (CLIENT OR URL):</label>
+            <div class="input-wrapper">
+                <span class="prompt">$</span>
+                <input type="text" id="clientInput" placeholder="nike.com" autocomplete="off">
+            </div>
+            <button id="startBtn">INITIALIZE_SCAN()</button>
+        </section>
+
+        <!-- Loader -->
+        <div class="loader hidden" id="loader">
+            <span class="blink">></span> SCANNING NETWORK... <span class="percent">0%</span>
+        </div>
+
+        <!-- Results Grid -->
+        <section class="results-grid hidden" id="results">
+            
+            <!-- Metadata Card -->
+            <div class="card full-width">
+                <div class="card-header">TARGET_INFO</div>
+                <div class="card-body" id="urlOutput">...</div>
+            </div>
+
+            <!-- Mood Card -->
+            <div class="card">
+                <div class="card-header">AESTHETIC_MOOD</div>
+                <div class="card-body highlight-text" id="mood">...</div>
+            </div>
+
+            <!-- GSAP Card -->
+            <div class="card">
+                <div class="card-header">GSAP_CONFIG</div>
+                <div class="card-body code-block" id="gsap">...</div>
+            </div>
+
+            <!-- NEW: Collapsible Buttons List -->
+            <div class="card full-width">
+                <div class="card-header toggle-header" onclick="toggleButtons()">
+                    <span>DETECTED_BUTTONS_DNA</span>
+                    <span class="toggle-icon" id="btn-toggle-icon">[+]</span>
+                </div>
+                <!-- Hidden by default (style="display:none") -->
+                <div class="card-body" id="buttons-container" style="display: none;">
+                    <!-- JS will inject button rows here -->
+                    <div style="color: #666; font-size: 12px;">Click header to expand...</div>
+                </div>
+            </div>
+
+            <!-- Advice Card -->
+            <div class="card full-width">
+                <div class="card-header">MOTION_DIRECTIVE</div>
+                <div class="card-body" id="advice">...</div>
+            </div>
+
+            <!-- Fonts Card -->
+            <div class="card full-width">
+                <div class="card-header">ASSETS_DETECTED (FONTS)</div>
+                <div class="card-body tags-container" id="fonts">
+                    Scanning...
+                </div>
+            </div>
+
+        </section>
+    </main>
+
+    <script src="script.js"></script>
+</body>
+</html>

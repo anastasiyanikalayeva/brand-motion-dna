@@ -1,0 +1,285 @@
+:root {
+    --bg-color: #0d0d0d;
+    --card-bg: #161616;
+    --border-color: #333333;
+    --text-main: #e0e0e0;
+    --text-dim: #777777;
+    --accent: #00ff41; /* Terminal Green */
+    --accent-dim: rgba(0, 255, 65, 0.1);
+    --error: #ff3333;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    padding: 0;
+    background-color: var(--bg-color);
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--text-main);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+}
+
+/* --- Layout --- */
+.terminal-window {
+    width: 100%;
+    max-width: 700px;
+    padding: 2rem;
+}
+
+header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 3rem;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 1rem;
+}
+
+.status-dot {
+    width: 10px;
+    height: 10px;
+    background-color: var(--accent);
+    border-radius: 50%;
+    box-shadow: 0 0 10px var(--accent);
+}
+
+h1 {
+    font-size: 14px;
+    margin: 0;
+    color: var(--text-dim);
+    letter-spacing: 1px;
+}
+
+/* --- Inputs --- */
+.input-section {
+    margin-bottom: 2rem;
+}
+
+label {
+    font-size: 12px;
+    color: var(--text-dim);
+    display: block;
+    margin-bottom: 10px;
+}
+
+.input-wrapper {
+    display: flex;
+    align-items: center;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    padding: 15px;
+    margin-bottom: 15px;
+    transition: border-color 0.2s;
+}
+
+.input-wrapper:focus-within {
+    border-color: var(--accent);
+}
+
+.prompt {
+    color: var(--accent);
+    margin-right: 10px;
+    font-weight: bold;
+}
+
+input {
+    background: transparent;
+    border: none;
+    color: var(--text-main);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 16px;
+    width: 100%;
+    outline: none;
+}
+
+button {
+    width: 100%;
+    padding: 15px;
+    background: var(--text-main);
+    color: var(--bg-color);
+    border: none;
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: bold;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+button:hover {
+    background: var(--accent);
+    box-shadow: 0 0 15px var(--accent-dim);
+}
+
+button:disabled {
+    background: var(--border-color);
+    color: var(--text-dim);
+    cursor: not-allowed;
+}
+
+/* --- Loader --- */
+.loader {
+    text-align: center;
+    color: var(--text-dim);
+    font-size: 14px;
+    margin: 2rem 0;
+}
+
+.blink {
+    animation: blinker 1s linear infinite;
+    color: var(--accent);
+}
+
+@keyframes blinker {
+    50% { opacity: 0; }
+}
+
+/* --- Grid Results --- */
+.results-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 15px;
+    animation: fadeIn 0.5s ease-out;
+}
+
+.hidden {
+    display: none;
+}
+
+.card {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    padding: 20px;
+}
+
+.full-width {
+    grid-column: span 2;
+}
+
+.card-header {
+    font-size: 10px;
+    color: var(--text-dim);
+    margin-bottom: 15px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.card-body {
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+.highlight-text {
+    color: var(--accent);
+}
+
+.code-block {
+    font-size: 13px;
+    color: #a8a8a8;
+}
+
+/* --- Tags for Fonts --- */
+.tags-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.tag {
+    background: transparent;
+    border: 1px solid var(--border-color);
+    color: var(--text-main);
+    padding: 5px 10px;
+    font-size: 12px;
+    text-decoration: none;
+    transition: 0.2s;
+}
+
+.tag:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* --- Collapsible Card Styles --- */
+.toggle-header {
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    user-select: none;
+    transition: color 0.2s;
+}
+
+.toggle-header:hover {
+    color: var(--accent);
+}
+
+.toggle-icon {
+    font-weight: bold;
+    font-size: 14px;
+}
+
+/* --- Button Grid Styles --- */
+.button-list {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 15px;
+    margin-top: 15px;
+}
+
+.button-item {
+    background: #222;
+    border: 1px solid #444;
+    padding: 10px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.preview-box {
+    width: 90px;
+    height: 35px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    border-radius: 4px;
+    border: 1px solid #555;
+    text-align: center;
+    overflow: hidden;
+    padding: 2px;
+}
+
+.btn-details {
+    flex: 1;
+    font-size: 11px;
+    color: #999;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.color-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.color-swatch {
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    border: 1px solid #555;
+    display: inline-block;
+}
