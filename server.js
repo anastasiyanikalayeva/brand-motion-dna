@@ -18,7 +18,7 @@ async function getUrlFromClientName(name) {
     if (name.includes('.') && !name.includes(' ')) {
         return name.startsWith('http') ? name : `https://${name}`;
     }
-    
+
     console.log(`Guessing URL for: ${name}`);
     try {
         const prompt = `What is the official homepage URL for the brand "${name}"? Reply with ONLY the URL.`;
@@ -33,7 +33,7 @@ async function getUrlFromClientName(name) {
 app.post('/analyze', async (req, res) => {
     const { clientInput } = req.body;
     let browser = null;
-    
+
     // DEFAULT MOCK DATA (Prevents 'undefined' errors)
     let analysis = {
         mood: "Waiting for AI...",
@@ -61,8 +61,9 @@ app.post('/analyze', async (req, res) => {
             if (resp.request().resourceType() === 'font') fontUrls.add(resp.url());
         });
 
-        // Timeout set to 30s to prevent hanging
-        await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
+        // 'domcontentloaded' triggers as soon as HTML/CSS is ready (much faster)
+        // Increase timeout to 60 seconds (60000ms) just in case
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
         // 3. Scrape Buttons
         const candidates = await page.evaluate(() => {
@@ -93,10 +94,10 @@ app.post('/analyze', async (req, res) => {
                 const visualNode = getVisualNode(el);
                 const s = window.getComputedStyle(visualNode);
                 el.setAttribute('data-puppeteer-id', index);
-                
+
                 let score = 0;
                 const relativeY = rect.top / window.innerHeight;
-                if (relativeY > 0.1 && relativeY < 0.6) score += 50; 
+                if (relativeY > 0.1 && relativeY < 0.6) score += 50;
                 if (s.backgroundColor !== 'rgba(0, 0, 0, 0)') score += 20;
                 if (rect.width > 100) score += 10;
 
@@ -155,7 +156,7 @@ app.post('/analyze', async (req, res) => {
         try {
             const prompt = `
                 Site BG: ${siteData.backgroundColor}
-                Buttons Found: ${JSON.stringify(finalButtons.slice(0,2))}
+                Buttons Found: ${JSON.stringify(finalButtons.slice(0, 2))}
                 Return JSON with:
                 1. "mood": 3 words description.
                 2. "gsap_ease": Best GSAP ease.
@@ -166,10 +167,10 @@ app.post('/analyze', async (req, res) => {
             analysis = JSON.parse(aiText.replace(/```json/g, '').replace(/```/g, ''));
         } catch (aiError) {
             console.log("⚠️ AI Quota Hit. Using Mock Data.");
-            analysis = { 
-                mood: "Dev Mode (Quota Hit)", 
-                gsap_ease: "power2.out (Fallback)", 
-                animation_advice: "AI is resting. Scraper data below is real." 
+            analysis = {
+                mood: "Dev Mode (Quota Hit)",
+                gsap_ease: "power2.out (Fallback)",
+                animation_advice: "AI is resting. Scraper data below is real."
             };
         }
 
@@ -183,8 +184,8 @@ app.post('/analyze', async (req, res) => {
 
     } catch (error) {
         console.error("Main Process Error:", error.message);
-        if(browser) await browser.close();
-        
+        if (browser) await browser.close();
+
         // Pass the error to the frontend
         res.status(500).json({ error: error.message });
     }
