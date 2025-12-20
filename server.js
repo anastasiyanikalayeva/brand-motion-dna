@@ -10,7 +10,7 @@ app.use(express.json());
 app.use(express.static('public'));
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
 
 // Helper: AI URL Guesser (Now with Fallback)
 async function getUrlFromClientName(name) {
@@ -166,7 +166,8 @@ app.post('/analyze', async (req, res) => {
             const aiText = aiResult.response.text();
             analysis = JSON.parse(aiText.replace(/```json/g, '').replace(/```/g, ''));
         } catch (aiError) {
-            console.log("⚠️ AI Quota Hit. Using Mock Data.");
+            console.error("REAL AI ERROR:", aiError.message); // <--- This will show us the truth
+            console.error("Full Error:", aiError);
             analysis = {
                 mood: "Dev Mode (Quota Hit)",
                 gsap_ease: "power2.out (Fallback)",
