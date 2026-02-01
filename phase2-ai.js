@@ -5,7 +5,7 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 // Initialize AI
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 // This alias automatically points to the currently available stable Flash model
-const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
+const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-001" });
 
 (async () => {
   const url = 'https://gsap.com'; // You can change this to 'https://stripe.com' or others later

@@ -10,7 +10,7 @@ app.use(express.json());
 app.use(express.static('public'));
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
+const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-001" });
 
 // Helper: AI URL Guesser (Now with Fallback)
 async function getUrlFromClientName(name) {
@@ -166,12 +166,19 @@ app.post('/analyze', async (req, res) => {
             const aiText = aiResult.response.text();
             analysis = JSON.parse(aiText.replace(/```json/g, '').replace(/```/g, ''));
         } catch (aiError) {
-            console.error("REAL AI ERROR:", aiError.message); // <--- This will show us the truth
-            console.error("Full Error:", aiError);
-            analysis = {
-                mood: "Dev Mode (Quota Hit)",
-                gsap_ease: "power2.out (Fallback)",
-                animation_advice: "AI is resting. Scraper data below is real."
+            // LOG THE REAL REASON
+            console.error("❌ ACTUAL AI ERROR:", aiError.message);
+            console.error("Full details:", JSON.stringify(aiError, null, 2));
+            
+            // Only say "Quota Hit" if it actually is one
+            let moodMsg = "AI Error (Check Logs)";
+            if (aiError.message.includes('429')) moodMsg = "Quota Limit Reached";
+            if (aiError.message.includes('API_KEY')) moodMsg = "Missing API Key";
+
+            analysis = { 
+                mood: moodMsg, 
+                gsap_ease: "power2.out (Fallback)", 
+                animation_advice: "AI failed. Scraper data below is real." 
             };
         }
 
