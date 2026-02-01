@@ -11,7 +11,7 @@ app.use(express.static('public'));
 
 // 1. SETUP AI (Stable Model)
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
 // 2. ROBUST URL GUESSER (With Google Search Fallback)
 async function getUrlFromClientName(name) {
