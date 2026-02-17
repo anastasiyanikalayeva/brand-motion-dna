@@ -1,6 +1,6 @@
 # Brand Motion DNA // AI DevTool 🧬
 
-A creative developer tool that analyzes websites to extract "Motion DNA" for HTML5 banners. It uses Headless Chrome (Puppeteer) to scrape visual styles and Google Gemini AI to generate animation recommendations.
+A creative developer tool that analyzes websites to extract "Motion DNA" for HTML5 banners. It uses Headless Chrome (Puppeteer) to scrape visual styles and Groq AI to generate animation recommendations.
 
 ## 🚀 Features
 
@@ -14,7 +14,7 @@ A creative developer tool that analyzes websites to extract "Motion DNA" for HTM
 *   **Frontend:** HTML5, CSS (Cyber/Terminal Style), Vanilla JS
 *   **Backend:** Node.js, Express
 *   **Browser Automation:** Puppeteer
-*   **AI:** Google Gemini API
+*   **AI:** Groq
 
 ## 📦 Installation
 
@@ -26,9 +26,9 @@ A creative developer tool that analyzes websites to extract "Motion DNA" for HTM
     ```bash
     npm install
     ```
-3.  Create a `.env` file and add your Google Gemini API Key:
+3.  Create a `.env` file and add your groq API Key:
     ```env
-    GEMINI_API_KEY=AIzaSy...
+    GROQ_API_KEY=AIzaSy...
     ```
 4.  Run the server
     ```bash

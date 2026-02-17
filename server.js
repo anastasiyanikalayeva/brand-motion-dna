@@ -2,23 +2,19 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const puppeteer = require('puppeteer');
-const Groq = require("groq-sdk"); // New AI Library
+const Groq = require("groq-sdk");
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
 
-// 1. SETUP GROQ AI
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-// 2. SIMPLE URL HELPER (No AI = No Quota used here)
 function getUrlFromClientName(name) {
-    // If user typed a URL, use it
     if (name.includes('.') && !name.includes(' ')) {
         return name.startsWith('http') ? name : `https://${name}`;
     }
-    // If just a name, default to Google Search (Puppeteer will scrape Google results)
     console.log(`Input is a name. Defaulting to Google Search for: ${name}`);
     return `https://www.google.com/search?q=${encodeURIComponent(name)}`;
 }
@@ -39,14 +35,12 @@ app.post('/analyze', async (req, res) => {
         url = getUrlFromClientName(clientInput);
         console.log(`Analyzing: ${url}`);
 
-        // 3. LAUNCH PUPPETEER (Low Memory Config)
         browser = await puppeteer.launch({
             headless: "new",
             args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--single-process", "--no-zygote"]
         });
         const page = await browser.newPage();
         
-        // Block Heavy Assets
         await page.setRequestInterception(true);
         page.on('request', (req) => {
             const rType = req.resourceType();
@@ -70,50 +64,124 @@ app.post('/analyze', async (req, res) => {
                 const s = window.getComputedStyle(el);
                 return s.display !== 'none' && s.visibility !== 'hidden' && s.opacity !== '0';
             }
-            function getVisualNode(node) {
+
+            // RECURSIVE DEEP SEARCH FOR COLOR
+            function findColoredNode(node) {
                 if (!node) return null;
                 const s = window.getComputedStyle(node);
-                if (s.backgroundColor !== 'rgba(0, 0, 0, 0)' && s.backgroundColor !== 'transparent') return node;
-                const children = Array.from(node.children);
-                for (let child of children) {
+                if (s.backgroundColor !== 'rgba(0, 0, 0, 0)' && s.backgroundColor !== 'transparent' && s.backgroundColor !== 'rgba(255, 255, 255, 0)') return node;
+                if (parseInt(s.borderWidth) > 0 && s.borderColor !== 'rgba(0, 0, 0, 0)' && s.borderColor !== 'transparent') return node;
+
+                let bestChild = null;
+                let maxArea = 0;
+                const allDescendants = node.querySelectorAll('*');
+                for (let child of allDescendants) {
                     const childS = window.getComputedStyle(child);
-                    if (childS.backgroundColor !== 'rgba(0, 0, 0, 0)' && childS.backgroundColor !== 'transparent') return child;
+                    const isColored = (childS.backgroundColor !== 'rgba(0, 0, 0, 0)' && childS.backgroundColor !== 'transparent');
+                    if (isColored) {
+                        const rect = child.getBoundingClientRect();
+                        const area = rect.width * rect.height;
+                        if (area > maxArea) {
+                            maxArea = area;
+                            bestChild = child;
+                        }
+                    }
                 }
-                return node;
+                return bestChild || node;
+            }
+
+            // --- THE ANTI-COOKIE FORCE FIELD ---
+            function isCookieArtifact(el, text) {
+                const t = text.toLowerCase();
+                // 1. Keyword Blacklist (English + Polish + Common)
+                const badWords = [
+                    'cookie', 'cookies', 'plik', 'pliki', // Basic
+                    'accept', 'akceptuj', 'agree', 'zgoda', 'zezwól', // Actions
+                    'privacy', 'polityka', 'policy', 'prywatności', // Legal
+                    'settings', 'ustawienia', 'preferences', 'preferencje', // Config
+                    'partner', 'vendor', 'dostawc', 'rodo', 'gdpr', // Legal
+                    'close', 'zamknij', 'x', 'got it', 'rozumiem' // Dismiss
+                ];
+                
+                if (badWords.some(w => t.includes(w))) return true;
+
+                // 2. ID/Class Blacklist (Common Providers)
+                const htmlStr = el.outerHTML.toLowerCase();
+                const badIDs = ['onetrust', 'cookie', 'consent', 'didomi', 'osano', 'usercentrics', 'gdpr', 'rodo'];
+                if (badIDs.some(id => htmlStr.includes(id))) return true;
+
+                // 3. Parent Container Check
+                // Walk up 3 levels to see if we are in a cookie banner container
+                let parent = el.parentElement;
+                let depth = 0;
+                while (parent && depth < 4) {
+                    const pClass = (parent.className || "").toString().toLowerCase();
+                    const pId = (parent.id || "").toString().toLowerCase();
+                    if (badIDs.some(bad => pClass.includes(bad) || pId.includes(bad))) return true;
+                    parent = parent.parentElement;
+                    depth++;
+                }
+
+                return false;
             }
 
             const allElements = Array.from(document.querySelectorAll('a, button, div[role="button"], input[type="submit"]'));
             
-            return allElements.filter(el => {
-                const rect = el.getBoundingClientRect();
-                return rect.width > 30 && rect.height > 20 && isVisible(el);
-            }).map((el, index) => {
-                const rect = el.getBoundingClientRect();
-                const visualNode = getVisualNode(el);
-                const s = window.getComputedStyle(visualNode);
-                
-                let score = 0;
-                const relativeY = rect.top / window.innerHeight;
-                if (relativeY > 0.1 && relativeY < 0.6) score += 50; 
-                if (s.backgroundColor !== 'rgba(0, 0, 0, 0)') score += 20;
-                if (rect.width > 100) score += 10;
-                const txt = el.innerText.toLowerCase();
-                if (['cookie', 'accept', 'privacy'].some(w => txt.includes(w))) score -= 50;
-
-                return {
-                    id: index,
-                    text: el.innerText.substring(0, 25).trim() || "Icon/Button",
-                    score: score,
-                    x: rect.x + (rect.width / 2),
-                    y: rect.y + (rect.height / 2),
-                    defaultStyle: {
-                        bg: s.backgroundColor,
-                        color: s.color,
-                        radius: s.borderRadius,
-                        font: s.fontFamily.split(',')[0].replace(/"/g, '')
+            return allElements
+                .filter(el => {
+                    const rect = el.getBoundingClientRect();
+                    return rect.width > 30 && rect.height > 20 && isVisible(el);
+                })
+                .map((el, index) => {
+                    const rect = el.getBoundingClientRect();
+                    const visualNode = findColoredNode(el);
+                    const s = window.getComputedStyle(visualNode);
+                    
+                    let text = el.innerText.trim();
+                    if (!text) text = el.getAttribute('aria-label') || "";
+                    if (!text) text = visualNode.innerText.trim();
+                    
+                    let score = 0;
+                    
+                    // --- SCORING LOGIC ---
+                    
+                    // 1. Cookie Penalty (DEATH SENTENCE)
+                    if (isCookieArtifact(el, text)) {
+                        score = -1000; // Impossible to recover
+                    } else {
+                        // 2. Hero Zone Bonus (Top of screen, but not Nav)
+                        const relativeY = rect.top / window.innerHeight;
+                        if (relativeY > 0.15 && relativeY < 0.65) score += 50; 
+                        
+                        // 3. Size Bonus
+                        if (rect.width > 120 && rect.height > 35) score += 20;
+                        
+                        // 4. Color Bonus
+                        const isTransparent = (s.backgroundColor === 'rgba(0, 0, 0, 0)' || s.backgroundColor === 'transparent');
+                        if (!isTransparent) score += 30;
+                        
+                        // 5. Keyword Bonus (Action words)
+                        const goodWords = ['shop', 'kup', 'buy', 'get', 'start', 'join', 'dołącz', 'odkryj', 'discover', 'zobacz', 'view', 'read'];
+                        if (goodWords.some(w => text.toLowerCase().includes(w))) score += 40;
                     }
-                };
-            }).sort((a, b) => b.score - a.score).slice(0, 6);
+
+                    return {
+                        id: index,
+                        text: text.substring(0, 25).trim() || "Icon/Button",
+                        score: score,
+                        x: rect.x + (rect.width / 2),
+                        y: rect.y + (rect.height / 2),
+                        defaultStyle: {
+                            bg: s.backgroundColor,
+                            color: s.color,
+                            radius: s.borderRadius,
+                            font: s.fontFamily.split(',')[0].replace(/"/g, '')
+                        }
+                    };
+                })
+                .filter(b => b.score > 0) // Only positive scores survive
+                .sort((a, b) => b.score - a.score)
+                .slice(0, 6);
         });
 
         // --- STEP 2: MOUSE HOVER ---
@@ -121,12 +189,28 @@ app.post('/analyze', async (req, res) => {
             try {
                 await page.mouse.move(btn.x, btn.y);
                 await new Promise(r => setTimeout(r, 300));
+                
                 const hoverData = await page.evaluate((x, y) => {
                     const el = document.elementFromPoint(x, y);
                     if (!el) return null;
-                    const s = window.getComputedStyle(el);
+                    
+                    function findColoredNode(node) {
+                        if(!node) return null;
+                        const s = window.getComputedStyle(node);
+                        if (s.backgroundColor !== 'rgba(0, 0, 0, 0)' && s.backgroundColor !== 'transparent') return node;
+                        const children = node.querySelectorAll('*'); 
+                        for (let child of children) {
+                            const cs = window.getComputedStyle(child);
+                            if (cs.backgroundColor !== 'rgba(0, 0, 0, 0)' && cs.backgroundColor !== 'transparent') return child;
+                        }
+                        return node;
+                    }
+
+                    const v = findColoredNode(el);
+                    const s = window.getComputedStyle(v);
                     return { bg: s.backgroundColor, color: s.color };
                 }, btn.x, btn.y);
+                
                 finalButtons.push({ ...btn, hoverStyle: hoverData || btn.defaultStyle });
             } catch (e) {
                 finalButtons.push(btn);
@@ -140,7 +224,7 @@ app.post('/analyze', async (req, res) => {
 
         await browser.close();
 
-        // --- STEP 3: AI ANALYSIS (USING GROQ) ---
+        // --- STEP 3: AI ANALYSIS ---
         try {
             const prompt = `
                 Analyze this website design data.
