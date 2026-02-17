@@ -41,7 +41,6 @@ app.post('/analyze', async (req, res) => {
         });
         const page = await browser.newPage();
         
-        // Block Heavy Assets
         await page.setRequestInterception(true);
         page.on('request', (req) => {
             const rType = req.resourceType();
@@ -57,96 +56,81 @@ app.post('/analyze', async (req, res) => {
         });
 
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
-        await new Promise(r => setTimeout(r, 2500)); // Wait a bit longer for hydration
+        await new Promise(r => setTimeout(r, 2500)); 
 
-        // --- THE PAINT HUNTER SCRAPER ---
+        // --- STEP 1: FIND BUTTONS ---
         const candidates = await page.evaluate(() => {
-            
-            // 1. Helper: Is it actually colored?
-            function isColorVisible(color) {
-                return color !== 'rgba(0, 0, 0, 0)' && color !== 'transparent' && color !== 'rgba(255, 255, 255, 0)';
+            function isVisible(el) {
+                const s = window.getComputedStyle(el);
+                return s.display !== 'none' && s.visibility !== 'hidden' && s.opacity !== '0';
             }
 
-            // 2. Helper: Recursive Search for the PAINT (Style)
-            function getVisibleStyle(node) {
+            // RECURSIVE PAINT HUNTER
+            function findColoredNode(node) {
                 if (!node) return null;
-                
                 const s = window.getComputedStyle(node);
-                const before = window.getComputedStyle(node, '::before');
-                const after = window.getComputedStyle(node, '::after');
-
-                // Check Element itself
-                if (isColorVisible(s.backgroundColor)) return s;
-                if (parseInt(s.borderWidth) > 0 && isColorVisible(s.borderColor)) return s;
-
-                // Check Pseudo ::before
-                if (isColorVisible(before.backgroundColor)) return before;
                 
-                // Check Pseudo ::after
-                if (isColorVisible(after.backgroundColor)) return after;
+                // Check Self
+                if (s.backgroundColor !== 'rgba(0, 0, 0, 0)' && s.backgroundColor !== 'transparent' && s.backgroundColor !== 'rgba(255, 255, 255, 0)') return node;
+                if (parseInt(s.borderWidth) > 0 && s.borderColor !== 'rgba(0, 0, 0, 0)' && s.borderColor !== 'transparent') return node;
 
-                // Check Children (Deep Dive)
-                // We prioritize children that look like buttons
-                const children = node.querySelectorAll('*');
-                let bestStyle = null;
+                // Check Children (Deep)
+                let bestChild = null;
                 let maxArea = 0;
-
-                for (let child of children) {
-                    const cs = window.getComputedStyle(child);
-                    if (isColorVisible(cs.backgroundColor)) {
+                const allDescendants = node.querySelectorAll('*');
+                for (let child of allDescendants) {
+                    const childS = window.getComputedStyle(child);
+                    const isColored = (childS.backgroundColor !== 'rgba(0, 0, 0, 0)' && childS.backgroundColor !== 'transparent');
+                    if (isColored) {
                         const rect = child.getBoundingClientRect();
                         const area = rect.width * rect.height;
                         if (area > maxArea) {
                             maxArea = area;
-                            bestStyle = cs;
+                            bestChild = child;
                         }
                     }
                 }
-                return bestStyle; // Might be null if nothing found
+                return bestChild || node;
             }
 
-            // 3. Helper: Anti-Cookie Logic
+            // Anti-Cookie Force Field
             function isCookieArtifact(text) {
                 const t = text.toLowerCase();
                 const badWords = ['cookie', 'accept', 'akceptuj', 'zgoda', 'agree', 'privacy', 'polityka', 'settings', 'ustawienia', 'close', 'zamknij'];
                 return badWords.some(w => t.includes(w));
             }
 
-            // --- MAIN LOOP ---
             const allElements = Array.from(document.querySelectorAll('a, button, div[role="button"], input[type="submit"]'));
             
-            const results = allElements.map((el, index) => {
+            return allElements.map((el, index) => {
                 const rect = el.getBoundingClientRect();
                 
-                // Filter out tiny or invisible click targets
                 if (rect.width < 30 || rect.height < 15) return null;
                 const style = window.getComputedStyle(el);
                 if (style.display === 'none' || style.visibility === 'hidden') return null;
 
-                // HUNT FOR PAINT
-                const visibleStyle = getVisibleStyle(el);
+                // Hunt for Paint
+                const visualNode = findColoredNode(el);
+                const s = window.getComputedStyle(visualNode);
                 
-                // GHOST BUSTER: If no color found anywhere in the tree, KILL IT.
-                if (!visibleStyle) return null;
+                // If transparent, kill it
+                const isTransparent = (s.backgroundColor === 'rgba(0, 0, 0, 0)' || s.backgroundColor === 'transparent');
+                const hasBorder = (parseInt(s.borderWidth) > 0 && s.borderColor !== 'transparent');
+                
+                if (isTransparent && !hasBorder) return null;
 
                 let text = el.innerText.trim();
                 if (!text) text = el.getAttribute('aria-label') || "";
+                if (!text) text = visualNode.innerText.trim();
                 
-                // SCORING
                 let score = 0;
-                
-                // Cookie Penalty
                 if (isCookieArtifact(text)) score = -500;
                 
-                // Position Bonus (Hero)
                 const relativeY = rect.top / window.innerHeight;
                 if (relativeY > 0.1 && relativeY < 0.6) score += 50;
-                
-                // Style Bonus
-                score += 20; // It has color (we verified above)
+                if (!isTransparent) score += 20; 
                 if (rect.width > 100) score += 10;
                 
-                // Keyword Bonus
                 const goodWords = ['shop', 'kup', 'buy', 'get', 'start', 'discover'];
                 if (goodWords.some(w => text.toLowerCase().includes(w))) score += 40;
 
@@ -157,45 +141,68 @@ app.post('/analyze', async (req, res) => {
                     x: rect.x + (rect.width / 2),
                     y: rect.y + (rect.height / 2),
                     defaultStyle: {
-                        bg: visibleStyle.backgroundColor,
-                        color: visibleStyle.color,
-                        radius: visibleStyle.borderRadius,
-                        font: visibleStyle.fontFamily.split(',')[0].replace(/"/g, '')
+                        bg: s.backgroundColor,
+                        color: s.color,
+                        radius: s.borderRadius,
+                        font: s.fontFamily.split(',')[0].replace(/"/g, '')
                     }
                 };
             })
-            .filter(item => item !== null && item.score > 0) // STRICT FILTER
+            .filter(item => item !== null && item.score > 0)
             .sort((a, b) => b.score - a.score)
             .slice(0, 6);
-
-            return results;
         });
 
-        // --- STEP 2: MOUSE HOVER ---
+        // --- STEP 2: MOUSE HOVER (UPGRADED) ---
         for (const btn of candidates) {
             try {
+                // 1. Move Mouse
                 await page.mouse.move(btn.x, btn.y);
-                await new Promise(r => setTimeout(r, 300));
+                
+                // 2. WAIT LONGER (600ms) for CSS transitions
+                await new Promise(r => setTimeout(r, 600));
                 
                 const hoverData = await page.evaluate((x, y) => {
                     const el = document.elementFromPoint(x, y);
                     if (!el) return null;
 
-                    // Re-use logic to find color on the hovered element
-                    function isColorVisible(color) {
-                         return color !== 'rgba(0, 0, 0, 0)' && color !== 'transparent';
+                    // 3. COPY OF THE EXACT SAME "PAINT HUNTER" LOGIC
+                    function findColoredNode(node) {
+                        if (!node) return null;
+                        const s = window.getComputedStyle(node);
+                        if (s.backgroundColor !== 'rgba(0, 0, 0, 0)' && s.backgroundColor !== 'transparent') return node;
+                        if (parseInt(s.borderWidth) > 0 && s.borderColor !== 'rgba(0, 0, 0, 0)') return node;
+                        
+                        // Deep Search Children
+                        let bestChild = null;
+                        let maxArea = 0;
+                        const allDescendants = node.querySelectorAll('*');
+                        for (let child of allDescendants) {
+                            const cs = window.getComputedStyle(child);
+                            const isColored = (cs.backgroundColor !== 'rgba(0, 0, 0, 0)' && cs.backgroundColor !== 'transparent');
+                            if (isColored) {
+                                const rect = child.getBoundingClientRect();
+                                const area = rect.width * rect.height;
+                                if (area > maxArea) {
+                                    maxArea = area;
+                                    bestChild = child;
+                                }
+                            }
+                        }
+                        return bestChild || node;
                     }
-                    
-                    const s = window.getComputedStyle(el);
-                    if (isColorVisible(s.backgroundColor)) return { bg: s.backgroundColor, color: s.color };
 
-                    // Check deep if direct hit didn't have color
-                    const children = el.querySelectorAll('*');
-                    for (let child of children) {
-                        const cs = window.getComputedStyle(child);
-                        if (isColorVisible(cs.backgroundColor)) return { bg: cs.backgroundColor, color: cs.color };
+                    // 4. Try the element hit by mouse
+                    let visual = findColoredNode(el);
+                    let s = window.getComputedStyle(visual);
+                    
+                    // 5. If still transparent, Try the PARENT (Wrapper logic)
+                    if (s.backgroundColor === 'rgba(0, 0, 0, 0)' && el.parentElement) {
+                        visual = findColoredNode(el.parentElement);
+                        s = window.getComputedStyle(visual);
                     }
-                    return null;
+
+                    return { bg: s.backgroundColor, color: s.color };
                 }, btn.x, btn.y);
                 
                 finalButtons.push({ ...btn, hoverStyle: hoverData || btn.defaultStyle });
@@ -211,7 +218,7 @@ app.post('/analyze', async (req, res) => {
 
         await browser.close();
 
-        // --- STEP 3: AI ANALYSIS ---
+        // --- STEP 3: AI ANALYSIS (Groq) ---
         try {
             const prompt = `
                 Analyze this website design data.
