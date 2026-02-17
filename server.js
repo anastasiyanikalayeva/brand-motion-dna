@@ -2,34 +2,25 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const puppeteer = require('puppeteer');
-const { GoogleGenerativeAI } = require("@google/generative-ai");
+const Groq = require("groq-sdk"); // New AI Library
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
 
-// 1. SETUP AI (Stable Model)
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+// 1. SETUP GROQ AI
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-// 2. ROBUST URL GUESSER (With Google Search Fallback)
-async function getUrlFromClientName(name) {
+// 2. SIMPLE URL HELPER (No AI = No Quota used here)
+function getUrlFromClientName(name) {
     // If user typed a URL, use it
     if (name.includes('.') && !name.includes(' ')) {
         return name.startsWith('http') ? name : `https://${name}`;
     }
-    
-    console.log(`Guessing URL for: ${name}`);
-    try {
-        const prompt = `What is the official homepage URL for the brand "${name}"? Reply with ONLY the URL.`;
-        const result = await model.generateContent(prompt);
-        return result.response.text().trim();
-    } catch (e) {
-        console.error("⚠️ AI URL Guessing Failed:", e.message);
-        // CRITICAL FALLBACK: Return Google Search URL so Puppeteer has something to load
-        return `https://www.google.com/search?q=${encodeURIComponent(name)}`;
-    }
+    // If just a name, default to Google Search (Puppeteer will scrape Google results)
+    console.log(`Input is a name. Defaulting to Google Search for: ${name}`);
+    return `https://www.google.com/search?q=${encodeURIComponent(name)}`;
 }
 
 app.post('/analyze', async (req, res) => {
@@ -45,53 +36,35 @@ app.post('/analyze', async (req, res) => {
     let url = "";
 
     try {
-        url = await getUrlFromClientName(clientInput);
+        url = getUrlFromClientName(clientInput);
         console.log(`Analyzing: ${url}`);
 
-        // 3. LOW MEMORY CONFIGURATION
+        // 3. LAUNCH PUPPETEER (Low Memory Config)
         browser = await puppeteer.launch({
             headless: "new",
-            args: [
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage", // Uses /tmp instead of shared memory (Critical for Docker/Render)
-                "--disable-gpu",           // Save RAM
-                "--single-process",        // Save RAM (Experimental but good for Free Tier)
-                "--no-zygote"
-            ]
+            args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--single-process", "--no-zygote"]
         });
         const page = await browser.newPage();
         
-        // 4. BLOCK HEAVY ASSETS (Images/Video)
+        // Block Heavy Assets
         await page.setRequestInterception(true);
         page.on('request', (req) => {
-            const resourceType = req.resourceType();
-            // Block images, media (video), and analytics beacons to save RAM
-            if (['image', 'media', 'stylesheet', 'font'].includes(resourceType) === false) {
-                 // We MUST allow 'script' (for React) and 'stylesheet' (for colors)
-            }
-            
-            if (resourceType === 'image' || resourceType === 'media') {
-                req.abort();
-            } else {
-                req.continue();
-            }
+            const rType = req.resourceType();
+            if (['image', 'media', 'stylesheet', 'font'].includes(rType) === false) {} 
+            if (rType === 'image' || rType === 'media') req.abort();
+            else req.continue();
         });
 
-        // Large viewport needed for coordinate accuracy
         await page.setViewport({ width: 1440, height: 900 });
 
         page.on('response', (resp) => {
             if (resp.request().resourceType() === 'font') fontUrls.add(resp.url());
         });
 
-        // Timeout 60s
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
-        
-        // Short wait for React hydration
         await new Promise(r => setTimeout(r, 2000));
 
-        // --- STEP 1: FIND BUTTONS & COORDINATES ---
+        // --- STEP 1: FIND BUTTONS ---
         const candidates = await page.evaluate(() => {
             function isVisible(el) {
                 const s = window.getComputedStyle(el);
@@ -101,7 +74,6 @@ app.post('/analyze', async (req, res) => {
                 if (!node) return null;
                 const s = window.getComputedStyle(node);
                 if (s.backgroundColor !== 'rgba(0, 0, 0, 0)' && s.backgroundColor !== 'transparent') return node;
-                // Check immediate children
                 const children = Array.from(node.children);
                 for (let child of children) {
                     const childS = window.getComputedStyle(child);
@@ -141,25 +113,20 @@ app.post('/analyze', async (req, res) => {
                         font: s.fontFamily.split(',')[0].replace(/"/g, '')
                     }
                 };
-            })
-            .sort((a, b) => b.score - a.score)
-            .slice(0, 6);
+            }).sort((a, b) => b.score - a.score).slice(0, 6);
         });
 
         // --- STEP 2: MOUSE HOVER ---
         for (const btn of candidates) {
             try {
                 await page.mouse.move(btn.x, btn.y);
-                await new Promise(r => setTimeout(r, 300)); // Shorter wait to save time
-
+                await new Promise(r => setTimeout(r, 300));
                 const hoverData = await page.evaluate((x, y) => {
                     const el = document.elementFromPoint(x, y);
                     if (!el) return null;
                     const s = window.getComputedStyle(el);
-                    // Simple check for hover color change
                     return { bg: s.backgroundColor, color: s.color };
                 }, btn.x, btn.y);
-
                 finalButtons.push({ ...btn, hoverStyle: hoverData || btn.defaultStyle });
             } catch (e) {
                 finalButtons.push(btn);
@@ -173,26 +140,35 @@ app.post('/analyze', async (req, res) => {
 
         await browser.close();
 
-        // --- STEP 3: AI ANALYSIS (With Logs) ---
+        // --- STEP 3: AI ANALYSIS (USING GROQ) ---
         try {
             const prompt = `
+                Analyze this website design data.
                 Site BG: ${siteData.backgroundColor}
                 Buttons Found: ${JSON.stringify(finalButtons.slice(0,2))}
-                Return JSON object with fields: mood, gsap_ease, animation_advice.
+                
+                Return a JSON object with these 3 keys: 
+                1. "mood": 3 words description.
+                2. "gsap_ease": Best GSAP easing curve (e.g. power2.out).
+                3. "animation_advice": 1 sentence advice.
             `;
-            const aiResult = await model.generateContent(prompt);
-            const aiText = aiResult.response.text();
-            analysis = JSON.parse(aiText.replace(/```json/g, '').replace(/```/g, ''));
+
+            const completion = await groq.chat.completions.create({
+                messages: [
+                    { role: "system", content: "You are a creative developer assistant. You MUST output valid JSON only." },
+                    { role: "user", content: prompt }
+                ],
+                model: "llama3-8b-8192", // Fast, free model
+                response_format: { type: "json_object" }
+            });
+
+            analysis = JSON.parse(completion.choices[0].message.content);
+
         } catch (aiError) {
-            console.error("❌ REAL AI ERROR:", aiError.message);
-            
-            let msg = "AI Error (Check Logs)";
-            if(aiError.message.includes("403") || aiError.message.includes("API_KEY")) msg = "Missing/Invalid API Key";
-            if(aiError.message.includes("404")) msg = "Model Not Found";
-            
+            console.error("❌ GROQ AI ERROR:", aiError.message);
             analysis = { 
-                mood: msg, 
-                gsap_ease: "power2.out (Fallback)", 
+                mood: "AI Error", 
+                gsap_ease: "power2.out", 
                 animation_advice: "AI failed. Scraper data below is real." 
             };
         }
