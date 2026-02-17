@@ -55,19 +55,6 @@
                 <div class="card-body code-block" id="gsap">...</div>
             </div>
 
-            <!-- NEW: Collapsible Buttons List -->
-            <div class="card full-width">
-                <div class="card-header toggle-header" onclick="toggleButtons()">
-                    <span>DETECTED_BUTTONS_DNA</span>
-                    <span class="toggle-icon" id="btn-toggle-icon">[+]</span>
-                </div>
-                <!-- Hidden by default (style="display:none") -->
-                <div class="card-body" id="buttons-container" style="display: none;">
-                    <!-- JS will inject button rows here -->
-                    <div style="color: #666; font-size: 12px;">Click header to expand...</div>
-                </div>
-            </div>
-
             <!-- Advice Card -->
             <div class="card full-width">
                 <div class="card-header">MOTION_DIRECTIVE</div>
@@ -79,6 +66,19 @@
                 <div class="card-header">ASSETS_DETECTED (FONTS)</div>
                 <div class="card-body tags-container" id="fonts">
                     Scanning...
+                </div>
+            </div>
+
+            <!-- Collapsible Buttons List -->
+            <div class="card full-width">
+                <div class="card-header toggle-header" onclick="toggleButtons()">
+                    <span>DETECTED_BUTTONS_DNA</span>
+                    <span class="toggle-icon" id="btn-toggle-icon">[+]</span>
+                </div>
+                <!-- Hidden by default (style="display:none") -->
+                <div class="card-body" id="buttons-container" style="display: none;">
+                    <!-- JS will inject button rows here -->
+                    <div style="color: #666; font-size: 12px;">Click header to expand...</div>
                 </div>
             </div>
 
