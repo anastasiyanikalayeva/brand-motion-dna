@@ -41,6 +41,7 @@ app.post('/analyze', async (req, res) => {
         });
         const page = await browser.newPage();
         
+        // Block Heavy Assets
         await page.setRequestInterception(true);
         page.on('request', (req) => {
             const rType = req.resourceType();
@@ -56,132 +57,118 @@ app.post('/analyze', async (req, res) => {
         });
 
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
-        await new Promise(r => setTimeout(r, 2000));
+        await new Promise(r => setTimeout(r, 2500)); // Wait a bit longer for hydration
 
-        // --- STEP 1: FIND BUTTONS ---
+        // --- THE PAINT HUNTER SCRAPER ---
         const candidates = await page.evaluate(() => {
-            function isVisible(el) {
-                const s = window.getComputedStyle(el);
-                return s.display !== 'none' && s.visibility !== 'hidden' && s.opacity !== '0';
+            
+            // 1. Helper: Is it actually colored?
+            function isColorVisible(color) {
+                return color !== 'rgba(0, 0, 0, 0)' && color !== 'transparent' && color !== 'rgba(255, 255, 255, 0)';
             }
 
-            // RECURSIVE DEEP SEARCH FOR COLOR
-            function findColoredNode(node) {
+            // 2. Helper: Recursive Search for the PAINT (Style)
+            function getVisibleStyle(node) {
                 if (!node) return null;
+                
                 const s = window.getComputedStyle(node);
-                if (s.backgroundColor !== 'rgba(0, 0, 0, 0)' && s.backgroundColor !== 'transparent' && s.backgroundColor !== 'rgba(255, 255, 255, 0)') return node;
-                if (parseInt(s.borderWidth) > 0 && s.borderColor !== 'rgba(0, 0, 0, 0)' && s.borderColor !== 'transparent') return node;
+                const before = window.getComputedStyle(node, '::before');
+                const after = window.getComputedStyle(node, '::after');
 
-                let bestChild = null;
+                // Check Element itself
+                if (isColorVisible(s.backgroundColor)) return s;
+                if (parseInt(s.borderWidth) > 0 && isColorVisible(s.borderColor)) return s;
+
+                // Check Pseudo ::before
+                if (isColorVisible(before.backgroundColor)) return before;
+                
+                // Check Pseudo ::after
+                if (isColorVisible(after.backgroundColor)) return after;
+
+                // Check Children (Deep Dive)
+                // We prioritize children that look like buttons
+                const children = node.querySelectorAll('*');
+                let bestStyle = null;
                 let maxArea = 0;
-                const allDescendants = node.querySelectorAll('*');
-                for (let child of allDescendants) {
-                    const childS = window.getComputedStyle(child);
-                    const isColored = (childS.backgroundColor !== 'rgba(0, 0, 0, 0)' && childS.backgroundColor !== 'transparent');
-                    if (isColored) {
+
+                for (let child of children) {
+                    const cs = window.getComputedStyle(child);
+                    if (isColorVisible(cs.backgroundColor)) {
                         const rect = child.getBoundingClientRect();
                         const area = rect.width * rect.height;
                         if (area > maxArea) {
                             maxArea = area;
-                            bestChild = child;
+                            bestStyle = cs;
                         }
                     }
                 }
-                return bestChild || node;
+                return bestStyle; // Might be null if nothing found
             }
 
-            // --- THE ANTI-COOKIE FORCE FIELD ---
-            function isCookieArtifact(el, text) {
+            // 3. Helper: Anti-Cookie Logic
+            function isCookieArtifact(text) {
                 const t = text.toLowerCase();
-                // 1. Keyword Blacklist (English + Polish + Common)
-                const badWords = [
-                    'cookie', 'cookies', 'plik', 'pliki', // Basic
-                    'accept', 'akceptuj', 'agree', 'zgoda', 'zezwól', // Actions
-                    'privacy', 'polityka', 'policy', 'prywatności', // Legal
-                    'settings', 'ustawienia', 'preferences', 'preferencje', // Config
-                    'partner', 'vendor', 'dostawc', 'rodo', 'gdpr', // Legal
-                    'close', 'zamknij', 'x', 'got it', 'rozumiem' // Dismiss
-                ];
-                
-                if (badWords.some(w => t.includes(w))) return true;
-
-                // 2. ID/Class Blacklist (Common Providers)
-                const htmlStr = el.outerHTML.toLowerCase();
-                const badIDs = ['onetrust', 'cookie', 'consent', 'didomi', 'osano', 'usercentrics', 'gdpr', 'rodo'];
-                if (badIDs.some(id => htmlStr.includes(id))) return true;
-
-                // 3. Parent Container Check
-                // Walk up 3 levels to see if we are in a cookie banner container
-                let parent = el.parentElement;
-                let depth = 0;
-                while (parent && depth < 4) {
-                    const pClass = (parent.className || "").toString().toLowerCase();
-                    const pId = (parent.id || "").toString().toLowerCase();
-                    if (badIDs.some(bad => pClass.includes(bad) || pId.includes(bad))) return true;
-                    parent = parent.parentElement;
-                    depth++;
-                }
-
-                return false;
+                const badWords = ['cookie', 'accept', 'akceptuj', 'zgoda', 'agree', 'privacy', 'polityka', 'settings', 'ustawienia', 'close', 'zamknij'];
+                return badWords.some(w => t.includes(w));
             }
 
+            // --- MAIN LOOP ---
             const allElements = Array.from(document.querySelectorAll('a, button, div[role="button"], input[type="submit"]'));
             
-            return allElements
-                .filter(el => {
-                    const rect = el.getBoundingClientRect();
-                    return rect.width > 30 && rect.height > 20 && isVisible(el);
-                })
-                .map((el, index) => {
-                    const rect = el.getBoundingClientRect();
-                    const visualNode = findColoredNode(el);
-                    const s = window.getComputedStyle(visualNode);
-                    
-                    let text = el.innerText.trim();
-                    if (!text) text = el.getAttribute('aria-label') || "";
-                    if (!text) text = visualNode.innerText.trim();
-                    
-                    let score = 0;
-                    
-                    // --- SCORING LOGIC ---
-                    
-                    // 1. Cookie Penalty (DEATH SENTENCE)
-                    if (isCookieArtifact(el, text)) {
-                        score = -1000; // Impossible to recover
-                    } else {
-                        // 2. Hero Zone Bonus (Top of screen, but not Nav)
-                        const relativeY = rect.top / window.innerHeight;
-                        if (relativeY > 0.15 && relativeY < 0.65) score += 50; 
-                        
-                        // 3. Size Bonus
-                        if (rect.width > 120 && rect.height > 35) score += 20;
-                        
-                        // 4. Color Bonus
-                        const isTransparent = (s.backgroundColor === 'rgba(0, 0, 0, 0)' || s.backgroundColor === 'transparent');
-                        if (!isTransparent) score += 30;
-                        
-                        // 5. Keyword Bonus (Action words)
-                        const goodWords = ['shop', 'kup', 'buy', 'get', 'start', 'join', 'dołącz', 'odkryj', 'discover', 'zobacz', 'view', 'read'];
-                        if (goodWords.some(w => text.toLowerCase().includes(w))) score += 40;
-                    }
+            const results = allElements.map((el, index) => {
+                const rect = el.getBoundingClientRect();
+                
+                // Filter out tiny or invisible click targets
+                if (rect.width < 30 || rect.height < 15) return null;
+                const style = window.getComputedStyle(el);
+                if (style.display === 'none' || style.visibility === 'hidden') return null;
 
-                    return {
-                        id: index,
-                        text: text.substring(0, 25).trim() || "Icon/Button",
-                        score: score,
-                        x: rect.x + (rect.width / 2),
-                        y: rect.y + (rect.height / 2),
-                        defaultStyle: {
-                            bg: s.backgroundColor,
-                            color: s.color,
-                            radius: s.borderRadius,
-                            font: s.fontFamily.split(',')[0].replace(/"/g, '')
-                        }
-                    };
-                })
-                .filter(b => b.score > 0) // Only positive scores survive
-                .sort((a, b) => b.score - a.score)
-                .slice(0, 6);
+                // HUNT FOR PAINT
+                const visibleStyle = getVisibleStyle(el);
+                
+                // GHOST BUSTER: If no color found anywhere in the tree, KILL IT.
+                if (!visibleStyle) return null;
+
+                let text = el.innerText.trim();
+                if (!text) text = el.getAttribute('aria-label') || "";
+                
+                // SCORING
+                let score = 0;
+                
+                // Cookie Penalty
+                if (isCookieArtifact(text)) score = -500;
+                
+                // Position Bonus (Hero)
+                const relativeY = rect.top / window.innerHeight;
+                if (relativeY > 0.1 && relativeY < 0.6) score += 50;
+                
+                // Style Bonus
+                score += 20; // It has color (we verified above)
+                if (rect.width > 100) score += 10;
+                
+                // Keyword Bonus
+                const goodWords = ['shop', 'kup', 'buy', 'get', 'start', 'discover'];
+                if (goodWords.some(w => text.toLowerCase().includes(w))) score += 40;
+
+                return {
+                    id: index,
+                    text: text.substring(0, 25).trim() || "Button",
+                    score: score,
+                    x: rect.x + (rect.width / 2),
+                    y: rect.y + (rect.height / 2),
+                    defaultStyle: {
+                        bg: visibleStyle.backgroundColor,
+                        color: visibleStyle.color,
+                        radius: visibleStyle.borderRadius,
+                        font: visibleStyle.fontFamily.split(',')[0].replace(/"/g, '')
+                    }
+                };
+            })
+            .filter(item => item !== null && item.score > 0) // STRICT FILTER
+            .sort((a, b) => b.score - a.score)
+            .slice(0, 6);
+
+            return results;
         });
 
         // --- STEP 2: MOUSE HOVER ---
@@ -193,22 +180,22 @@ app.post('/analyze', async (req, res) => {
                 const hoverData = await page.evaluate((x, y) => {
                     const el = document.elementFromPoint(x, y);
                     if (!el) return null;
-                    
-                    function findColoredNode(node) {
-                        if(!node) return null;
-                        const s = window.getComputedStyle(node);
-                        if (s.backgroundColor !== 'rgba(0, 0, 0, 0)' && s.backgroundColor !== 'transparent') return node;
-                        const children = node.querySelectorAll('*'); 
-                        for (let child of children) {
-                            const cs = window.getComputedStyle(child);
-                            if (cs.backgroundColor !== 'rgba(0, 0, 0, 0)' && cs.backgroundColor !== 'transparent') return child;
-                        }
-                        return node;
-                    }
 
-                    const v = findColoredNode(el);
-                    const s = window.getComputedStyle(v);
-                    return { bg: s.backgroundColor, color: s.color };
+                    // Re-use logic to find color on the hovered element
+                    function isColorVisible(color) {
+                         return color !== 'rgba(0, 0, 0, 0)' && color !== 'transparent';
+                    }
+                    
+                    const s = window.getComputedStyle(el);
+                    if (isColorVisible(s.backgroundColor)) return { bg: s.backgroundColor, color: s.color };
+
+                    // Check deep if direct hit didn't have color
+                    const children = el.querySelectorAll('*');
+                    for (let child of children) {
+                        const cs = window.getComputedStyle(child);
+                        if (isColorVisible(cs.backgroundColor)) return { bg: cs.backgroundColor, color: cs.color };
+                    }
+                    return null;
                 }, btn.x, btn.y);
                 
                 finalButtons.push({ ...btn, hoverStyle: hoverData || btn.defaultStyle });
@@ -230,16 +217,12 @@ app.post('/analyze', async (req, res) => {
                 Analyze this website design data.
                 Site BG: ${siteData.backgroundColor}
                 Buttons Found: ${JSON.stringify(finalButtons.slice(0,2))}
-                
-                Return a JSON object with these 3 keys: 
-                1. "mood": 3 words description.
-                2. "gsap_ease": Best GSAP easing curve (e.g. power2.out).
-                3. "animation_advice": 1 sentence advice.
+                Return JSON: { "mood": "string", "gsap_ease": "string", "animation_advice": "string" }
             `;
 
             const completion = await groq.chat.completions.create({
                 messages: [
-                    { role: "system", content: "You are a creative developer assistant. You MUST output valid JSON only." },
+                    { role: "system", content: "You are a creative developer assistant. Output JSON only." },
                     { role: "user", content: prompt }
                 ],
                 model: "llama-3.1-8b-instant",
