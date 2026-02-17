@@ -158,7 +158,7 @@ app.post('/analyze', async (req, res) => {
                     { role: "system", content: "You are a creative developer assistant. You MUST output valid JSON only." },
                     { role: "user", content: prompt }
                 ],
-                model: "llama3-8b-8192", // Fast, free model
+                model: "llama-3.1-8b-instant",
                 response_format: { type: "json_object" }
             });
 
